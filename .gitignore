@@ -1,6 +1,7 @@
 # --- secrets / local-only config ---
 configs/web_auth.yaml
-configs/display_map.yaml        # §4.4 slot↔real-name mapping stays local; commit the .example only
+# §4.4 slot↔real-name mapping stays local; only display_map.example.yaml is committed
+configs/display_map.yaml
 configs/.*_check.yaml
 
 # --- data (Nemotron 2GB raw + processed parquet) ---

@@ -1,0 +1,9 @@
+# §4.4 표시명 매핑. 엔진·로그·산출물에는 절대 포함되지 않는다.
+# 렌더링(리포트·UI) 시점에만 opinion_field.observe.display 가 읽는다.
+# 이 파일이 슬롯↔실존 대조표이므로 별도 보관하고, 산출 데이터셋과 함께 배포하지 말 것.
+slots:
+  A:  {display: "후보 A", note: ""}
+  B:  {display: "후보 B", note: ""}
+  갑: {display: "정당 갑", note: ""}
+  을: {display: "정당 을", note: ""}
+  I:  {display: "이슈 I",  note: ""}

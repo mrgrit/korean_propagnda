@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# Priors used by the data-join pipeline (§3.1). LLM-free.
+#
+# PROVENANCE MATTERS. Every block carries a `source` tag that is copied into
+# data/processed/manifest.json so a run can never be mistaken for one built on
+# real election data when it was not.
+#
+#   regional.source == SYNTHETIC_PLACEHOLDER  → the a_share values below are an
+#     invented spread (not any real election result). Replace with shares
+#     aggregated from 선관위 개표결과 (data.nec.go.kr) per 시도 and set
+#     source: NEC_<election-id>.
+#   media.source == APPROX_PLACEHOLDER → approximate generational media-use
+#     shape; replace with KOBACO / 언론재단 미디어서베이 tables.
+# ---------------------------------------------------------------------------
+regional:
+  source: SYNTHETIC_PLACEHOLDER
+  # a_share: share of the two-candidate vote going to slot A (0..1); turnout: 0..1
+  서울: {a_share: 0.50, turnout: 0.77}
+  부산: {a_share: 0.44, turnout: 0.75}
+  대구: {a_share: 0.36, turnout: 0.76}
+  인천: {a_share: 0.51, turnout: 0.73}
+  광주: {a_share: 0.66, turnout: 0.80}
+  대전: {a_share: 0.52, turnout: 0.76}
+  울산: {a_share: 0.45, turnout: 0.77}
+  세종: {a_share: 0.56, turnout: 0.80}
+  경기: {a_share: 0.52, turnout: 0.76}
+  강원: {a_share: 0.45, turnout: 0.74}
+  충북: {a_share: 0.49, turnout: 0.74}
+  충남: {a_share: 0.49, turnout: 0.73}
+  전북: {a_share: 0.64, turnout: 0.79}
+  전남: {a_share: 0.66, turnout: 0.80}
+  경북: {a_share: 0.36, turnout: 0.77}
+  경남: {a_share: 0.43, turnout: 0.76}
+  제주: {a_share: 0.51, turnout: 0.72}
+
+support_structure:
+  source: APPROX_PLACEHOLDER
+  # by age_group index 0..5 (19-29,30s,40s,50s,60s,70+)
+  strong_frac: [0.30, 0.34, 0.40, 0.48, 0.58, 0.65]   # share of partisans who are "strong"
+  undecided:   [0.30, 0.26, 0.20, 0.16, 0.12, 0.10]   # share of would-be voters who are undecided
+
+media:
+  source: APPROX_PLACEHOLDER
+  # rows = channel, cols = age_group 0..5. reach: P(channel reaches this person per unit dose)
+  reach_by_age:
+    youtube:   [0.85, 0.82, 0.78, 0.72, 0.62, 0.45]
+    portal:    [0.70, 0.78, 0.80, 0.78, 0.66, 0.45]
+    kakao:     [0.75, 0.82, 0.86, 0.88, 0.85, 0.72]
+    instagram: [0.80, 0.62, 0.40, 0.22, 0.10, 0.04]
+    tv:        [0.35, 0.45, 0.58, 0.72, 0.85, 0.92]
+    wom:       [0.55, 0.55, 0.58, 0.62, 0.66, 0.70]
+  trust_by_age:
+    youtube:   [0.45, 0.45, 0.48, 0.52, 0.56, 0.58]
+    portal:    [0.55, 0.56, 0.58, 0.58, 0.56, 0.52]
+    kakao:     [0.35, 0.38, 0.42, 0.50, 0.58, 0.64]
+    instagram: [0.40, 0.38, 0.35, 0.32, 0.30, 0.28]
+    tv:        [0.50, 0.52, 0.56, 0.62, 0.70, 0.76]
+    wom:       [0.55, 0.56, 0.58, 0.60, 0.64, 0.68]
+  reach_noise_sd: 0.15
+  trust_noise_sd: 0.08
+
+persuadability:
+  source: APPROX_PLACEHOLDER
+  by_age:        [0.56, 0.52, 0.47, 0.43, 0.40, 0.38]
+  by_edu_bucket: [0.04, 0.00, -0.04]
+  noise_sd: 0.12
+
+literacy:
+  source: APPROX_PLACEHOLDER
+  by_edu:      [0.15, 0.24, 0.34, 0.50, 0.58, 0.68, 0.78]   # 무학..대학원
+  age_penalty: [0.00, 0.00, 0.00, -0.03, -0.08, -0.15]
+  noise_sd: 0.08

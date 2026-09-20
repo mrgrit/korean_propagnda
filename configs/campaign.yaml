@@ -1,0 +1,30 @@
+# Absolute-power inputs (§1.2): goal, budget, defender strength, ethics level, rounds.
+name: p0-default
+goal_target: A
+goal_margin: 0.05
+budget: 3000000
+ethics_level: 0.5
+rounds: 20
+seed: 42
+checkpoint_every: 1
+
+promotion:
+  k: 500
+  k_l3: 100
+
+defender:
+  enabled: true
+  strength: 0.5
+
+backend:
+  kind: cc            # mock | cc | api   (cc = Claude Code subscription session logged in on THIS machine)
+  model: haiku        # L2 judgments on the low-cost model (§2.1)
+  concurrency: 6      # parallel `claude -p` workers (I/O bound)
+  timeout_s: 120
+  max_wait_s: 900     # wait this long on a usage-limit backoff before falling back + checkpointing
+  thinking_tokens: 0  # MAX_THINKING_TOKENS for the worker; 0 halves latency on haiku
+  # api alternative: {kind: api, model: claude-haiku-4-5, mode: batch, concurrency: 16}
+  # dry run:         --backend mock
+
+paths:
+  processed_dir: data/processed

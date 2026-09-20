@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>여론장 Opinion Field</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">여론장 <span class="muted">Opinion Field · P0</span></div>
+  <div class="chips" id="status-chips"></div>
+  <div class="spacer"></div>
+  <select id="run-select" title="실행 선택"></select>
+  <button id="btn-refresh" class="ghost" title="새로고침">↻</button>
+  <button id="btn-theme" class="ghost" title="테마">◐</button>
+  <form method="post" action="/logout" class="inline"><button class="ghost">로그아웃</button></form>
+</header>
+
+<main class="panes">
+  <!-- ─────────── 좌: 설정 ─────────── -->
+  <section class="pane pane-left">
+    <details open>
+      <summary>데이터</summary>
+      <div id="data-list" class="list"></div>
+      <div class="form-grid">
+        <label>합성 인구 N <input id="b-synthetic" type="number" placeholder="비우면 Nemotron 실데이터"></label>
+        <label>실데이터 상한 <input id="b-limit" type="number" placeholder="비우면 100만 전체"></label>
+        <label>출력 폴더 <input id="b-out" type="text" placeholder="data/processed"></label>
+        <label>시드 <input id="b-seed" type="number" value="20260920"></label>
+      </div>
+      <button id="btn-build" class="secondary">데이터 빌드</button>
+    </details>
+
+    <details open>
+      <summary>캠페인 설정 (절대권자 입력)</summary>
+      <div class="form-grid" id="cfg-form">
+        <label>실행 이름 <input id="r-name" type="text" placeholder="예: run01"></label>
+        <label>데이터 <select id="r-data"></select></label>
+        <label>라운드 <input id="c-rounds" type="number" min="1"></label>
+        <label>시드 <input id="c-seed" type="number"></label>
+        <label>총 예산 <input id="c-budget" type="number" step="10000"></label>
+        <label>목표 마진 <input id="c-goal_margin" type="number" step="0.01"></label>
+        <label class="span2">윤리 수위(허위 허용) <span class="val" id="v-ethics"></span>
+          <input id="c-ethics_level" type="range" min="0" max="1" step="0.05"></label>
+        <label class="span2 check"><input id="c-defender_enabled" type="checkbox"> 방어자 활성</label>
+        <label class="span2">방어 강도 <span class="val" id="v-dstr"></span>
+          <input id="c-defender_strength" type="range" min="0" max="1" step="0.05"></label>
+        <label>정정 예산 비율 <input id="c-defender_budget_ratio" type="number" step="0.1" min="0"></label>
+        <label>되돌림 기본율 <input id="c-defender_revert_base" type="number" step="0.05" min="0" max="1"></label>
+        <label>L2 승격 K <input id="c-promotion_k" type="number" min="0"></label>
+        <label>L3 2차 승격 <input id="c-promotion_k_l3" type="number" min="0"></label>
+        <label>표적 셀 수 <input id="c-manipulator_n_target_cells" type="number" min="1"></label>
+        <label>체크포인트 주기 <input id="c-checkpoint_every" type="number" min="0"></label>
+      </div>
+      <div class="form-grid">
+        <label>백엔드 <select id="c-backend_kind">
+          <option value="cc">cc — Claude Code 구독 세션 (이 머신 로그인 계정)</option>
+          <option value="mock">mock — LLM 없음 (뼈대 검증)</option>
+          <option value="api">api — Anthropic API (과금)</option></select></label>
+        <label>모델 <input id="c-backend_model" type="text" placeholder="haiku"></label>
+        <label>동시 워커 <input id="c-backend_concurrency" type="number" min="1" max="32"></label>
+        <label>thinking 토큰 <input id="c-backend_thinking_tokens" type="number" min="0"></label>
+      </div>
+      <div class="btn-row">
+        <button id="btn-save" class="secondary">설정 저장</button>
+        <label class="check"><input id="r-resume" type="checkbox"> 체크포인트에서 재개</label>
+      </div>
+      <div class="btn-row">
+        <button id="btn-run" class="primary">실행</button>
+        <button id="btn-compare" class="primary alt">방어 on/off 대조 실행</button>
+        <button id="btn-stop" class="danger" hidden>중지</button>
+      </div>
+      <p class="hint muted" id="run-hint"></p>
+    </details>
+
+    <details>
+      <summary>고급: 설정 파일 편집</summary>
+      <div class="tabs" id="file-tabs">
+        <button data-kind="campaign" class="active">campaign</button>
+        <button data-kind="priors">priors</button>
+        <button data-kind="channels">channels</button>
+        <button data-kind="display_map">display_map</button>
+      </div>
+      <textarea id="file-text" spellcheck="false" rows="18"></textarea>
+      <div class="btn-row"><button id="btn-file-save" class="secondary">파일 저장</button><span id="file-msg" class="muted"></span></div>
+    </details>
+
+    <details open>
+      <summary>작업 콘솔</summary>
+      <div id="job-progress" class="progress"><div class="bar"></div><span class="label"></span></div>
+      <pre id="job-log" class="console"></pre>
+    </details>
+  </section>
+
+  <!-- ─────────── 중앙: 확산 뷰 ─────────── -->
+  <section class="pane pane-center">
+    <div class="pane-head">
+      <h2>확산 뷰 <span class="muted" id="center-run"></span></h2>
+      <div class="controls">
+        <select id="hm-metric">
+          <option value="net_rate">누적 순이동률 (A방향 +, B방향 −)</option>
+          <option value="exposed_rate">이번 라운드 노출률</option>
+        </select>
+        <button id="hm-play" class="ghost">▶</button>
+        <input id="hm-round" type="range" min="1" max="1" value="1">
+        <span id="hm-round-label" class="val"></span>
+      </div>
+    </div>
+    <div id="heatmap" class="chart"></div>
+    <div class="two-col">
+      <div>
+        <h3>채널별 노출 비중 <span class="muted">(선택 라운드)</span></h3>
+        <div id="channel-bars" class="chart"></div>
+      </div>
+      <div>
+        <h3>조작자 계획 <span class="muted">(선택 라운드)</span></h3>
+        <div id="plan-box" class="plan-box"></div>
+      </div>
+    </div>
+    <h3>세그먼트별 기여 <span class="muted">(순 A방향 이동 상위 15개 셀, 전체 라운드)</span></h3>
+    <div id="contrib-table" class="table-wrap"></div>
+  </section>
+
+  <!-- ─────────── 우: KPI·궤적·로그 ─────────── -->
+  <section class="pane pane-right">
+    <div id="kpis" class="kpis"></div>
+    <h3>지지율 궤적 <span class="muted">(결정층 기준)</span></h3>
+    <div id="traj-chart" class="chart"></div>
+    <h3>마진 (A − B) <span class="muted">vs 목표</span></h3>
+    <div id="margin-chart" class="chart"></div>
+    <div id="compare-wrap" hidden>
+      <h3>방어 on / off 대조 <span class="muted">(같은 시드)</span></h3>
+      <div id="compare-chart" class="chart"></div>
+    </div>
+    <h3>상태 분포</h3>
+    <div id="state-chart" class="chart"></div>
+    <div class="btn-row">
+      <button id="btn-report" class="secondary">리포트</button>
+      <label class="check"><input id="rep-display" type="checkbox"> 표시명 적용</label>
+      <button id="btn-delete" class="ghost danger-text">삭제</button>
+    </div>
+    <h3>조작 vs 방어 로그</h3>
+    <ol id="battle-log" class="battle-log"></ol>
+  </section>
+</main>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<div id="modal" class="modal" hidden><div class="modal-card"><div class="modal-head"><span id="modal-title"></span><button id="modal-close" class="ghost">✕</button></div><div id="modal-body" class="modal-body"></div></div></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

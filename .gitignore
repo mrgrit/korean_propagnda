@@ -1,0 +1,19 @@
+# --- secrets / local-only config ---
+configs/web_auth.yaml
+configs/display_map.yaml        # §4.4 slot↔real-name mapping stays local; commit the .example only
+configs/.*_check.yaml
+
+# --- data (Nemotron 2GB raw + processed parquet) ---
+data/
+
+# --- run outputs (logs, checkpoints, L2 responses) ---
+runs/
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/

@@ -25,7 +25,7 @@ backend:
   model: haiku        # L2 judgments on the low-cost model (§2.1)
   concurrency: 6      # parallel `claude -p` workers (I/O bound)
   timeout_s: 120
-  max_wait_s: 900     # wait this long on a usage-limit backoff before falling back + checkpointing
+  max_wait_s: 120     # usage-limit backoff budget per call; beyond this the round is discarded, the run pauses at the last checkpoint and auto-resumes when the window reopens (probe every 10 min)
   thinking_tokens: 0  # MAX_THINKING_TOKENS for the worker; 0 halves latency on haiku
   batch_size: 8       # P1: personas per call (8× fewer calls than one-per-persona)
   strategy_model: sonnet   # P1: manipulator/defender strategist model (2 calls per round)

@@ -85,6 +85,12 @@ class AgentBackend(ABC):
     name: str = "abstract"
     batch_size: int = 1
     strategy_model: str | None = None
+    exhausted: bool = False            # usage limit persisted beyond max_wait_s → loop pauses at the round boundary
+
+    def probe(self) -> bool:
+        """Cheap liveness check used while paused on a usage limit. True → clear `exhausted`."""
+        self.exhausted = False
+        return True
 
     @abstractmethod
     def generate(self, system: str, user: str, schema: dict[str, Any], *, model: str | None = None,

@@ -23,6 +23,10 @@ from .population import LEAN, STEP_DOWN, STEP_UP, Population
 from .promote import select_promoted
 
 
+class UsageLimitPaused(Exception):
+    """Raised inside step() when the backend's usage window closed; the round is discarded."""
+
+
 class Simulation:
     def __init__(self, cfg: CampaignConfig, pop: Population, chan: ChannelTable, backend: AgentBackend,
                  out_dir: str | Path, data_manifest: dict[str, Any] | None = None, log=print):
@@ -71,6 +75,7 @@ class Simulation:
             self.logger.write_manifest(self.manifest())
         records = self.logger.read_rounds()
         self.stopped = False
+        self.paused = False
         while self.round_no < self.cfg.rounds:
             if should_stop is not None and should_stop():
                 self.stopped = True
@@ -80,7 +85,15 @@ class Simulation:
                 self.logger.write_manifest(dict(self.manifest(), stopped=True))
                 self.log(f"[sim] stopped after round {self.round_no} (checkpoint saved; resume to continue)")
                 return records
-            rec = self.step()
+            try:
+                rec = self.step()
+            except UsageLimitPaused as e:
+                self.paused = True
+                self.logger.write_manifest(dict(self.manifest(), paused=True, paused_reason="usage_limit",
+                                                paused_at_round=self.round_no + 1))
+                self.log(f"[sim] usage limit reached during round {self.round_no + 1}: round discarded, "
+                         f"state = checkpoint of round {self.round_no}; resume when the window reopens ({e})")
+                return records
             records.append(rec)
             if on_round is not None:
                 on_round(rec)
@@ -94,6 +107,25 @@ class Simulation:
         self._record_memory()
         self.logger.write_manifest(self.manifest(final=True))
         return records
+
+    def reset_to_start(self) -> None:
+        """Back to round 0 (used when a pause happens before any checkpoint exists)."""
+        self.pop.reset_dynamic(self.pop.initial_state)
+        self.rng = np.random.default_rng(self.cfg.seed)
+        self.round_no = 0
+        self.cost_cum = self.cost_def_cum = 0.0
+        self.goal_round = None
+        self.manip.yield_ema[:] = 1.0
+        if hasattr(self.manip, "history"):
+            self.manip.history = []
+        if hasattr(self.defender, "history"):
+            self.defender.history = []
+        self.logger.truncate_after(0)
+
+    def rewind_to_checkpoint(self) -> None:
+        """After a pause: restore the last checkpoint (or the start) so the discarded round re-runs identically."""
+        if not self.load_checkpoint():
+            self.reset_to_start()
 
     def _record_memory(self) -> None:
         """Write this run's group-level strategist history into the cross-run memory (aggregates only)."""
@@ -134,6 +166,8 @@ class Simulation:
         t_l2 = time.time()
         resps = self.backend.react(reqs) if reqs else []
         l2_elapsed = time.time() - t_l2
+        if getattr(self.backend, "exhausted", False):
+            raise UsageLimitPaused("during L2 wave 1")
         up[pos] = False
         down[pos] = False
         apply_moves(state_new, ex.idx, up, down)
@@ -174,11 +208,15 @@ class Simulation:
             state_new[j_dn] = STEP_DOWN[state_new[j_dn]]
         else:
             apply_l3(state_new, l3)
+        if getattr(self.backend, "exhausted", False):
+            raise UsageLimitPaused("during L2 wave 2")
         # 7. defender -----------------------------------------------------------------
         moved_up_mask = state_new > pop.state
         t_s = time.time()
         dres = self.defender.act(pop, plan, ex.idx, state_new, moved_up_mask, rno, rng)
         strategy_elapsed += time.time() - t_s
+        if getattr(self.backend, "exhausted", False):
+            raise UsageLimitPaused("during defender strategy")
         # 8. commit ---------------------------------------------------------------------
         changed = state_new != pop.state
         pop.move_dir[changed] = np.sign(state_new[changed].astype(np.int16) - pop.state[changed].astype(np.int16)).astype(np.int8)
@@ -283,3 +321,30 @@ class Simulation:
             self.manip.budget_per_round = float(meta["budget_per_round"])
         self.logger.truncate_after(self.round_no)
         return True
+
+
+def run_until_done(sim: "Simulation", resume: bool = False, should_stop=None, on_round=None,
+                   retry_s: int = 600, on_wait=None) -> list[dict[str, Any]]:
+    """Run a simulation to completion, waiting out backend usage-limit windows.
+
+    On a pause: the discarded round is re-run from the last checkpoint once `backend.probe()`
+    succeeds. Between probes we sleep `retry_s` (polling `should_stop` every 5 s)."""
+    records = sim.run(resume=resume, should_stop=should_stop, on_round=on_round)
+    while getattr(sim, "paused", False):
+        if should_stop is not None and should_stop():
+            return records
+        waited = 0
+        while waited < retry_s:
+            if should_stop is not None and should_stop():
+                return records
+            time.sleep(5)
+            waited += 5
+            if on_wait is not None:
+                on_wait(retry_s - waited)
+        if not sim.backend.probe():
+            sim.log("[sim] usage window still closed — will retry")
+            continue
+        sim.log("[sim] usage window open — resuming from checkpoint")
+        sim.rewind_to_checkpoint()
+        records = sim.run(resume=True, should_stop=should_stop, on_round=on_round)
+    return records

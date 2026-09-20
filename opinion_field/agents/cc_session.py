@@ -41,7 +41,7 @@ class CCSessionBackend(AgentBackend):
     name = "cc"
 
     def __init__(self, model: str = "haiku", concurrency: int = 4, timeout_s: int = 180,
-                 claude_bin: str = "claude", config_dir: str | None = None, max_wait_s: int = 900,
+                 claude_bin: str = "claude", config_dir: str | None = None, max_wait_s: int = 120,
                  backoff_s: int = 30, max_budget_usd: float | None = None, max_turns: int = 3,
                  debug_dir: str | None = None, thinking_tokens: int = 0, batch_size: int = 8,
                  strategy_model: str | None = "sonnet", strategy_thinking_tokens: int = 2048):
@@ -60,8 +60,24 @@ class CCSessionBackend(AgentBackend):
         self.strategy_model = strategy_model or model
         self.strategy_thinking_tokens = int(strategy_thinking_tokens)
         self.stats = {"calls": 0, "ok": 0, "fallback": 0, "limit_hits": 0, "cost_usd_reported": 0.0,
-                      "input_tokens": 0, "output_tokens": 0, "strategy_calls": 0, "personas": 0}
+                      "input_tokens": 0, "output_tokens": 0, "strategy_calls": 0, "personas": 0, "pauses": 0}
         self._limited_until = 0.0
+        self._backoff0 = backoff_s
+        self.exhausted = False
+
+    def probe(self) -> bool:
+        """One tiny haiku call. Success → usage window is open again: clear `exhausted`, reset backoff."""
+        was = self.exhausted
+        self.exhausted = False
+        self._limited_until = 0.0
+        data, err = self.generate("짧게 답하세요.", "ok 라고만 답하세요.", {"type": "object", "properties": {"ok": {"type": "boolean"}},
+                                                                  "required": ["ok"], "additionalProperties": False},
+                                  model=self.model, context={"kind": "probe"})
+        if data is not None:
+            self.backoff_s = self._backoff0
+            return True
+        self.exhausted = was or self.exhausted
+        return False
 
     def _env(self, thinking: int) -> dict[str, str]:
         env = dict(os.environ)
@@ -101,11 +117,17 @@ class CCSessionBackend(AgentBackend):
         tag = (context or {}).get("kind", "call")
         deadline = time.time() + self.max_wait_s
         while True:
+            if self.exhausted and tag != "probe":          # do not queue up behind a known-closed window
+                self.stats["fallback"] += 1
+                return None, "usage-limit"
             wait = self._limited_until - time.time()
             if wait > 0:
                 if time.time() + wait > deadline:
                     self.stats["fallback"] += 1
-                    return None, "limit-wait-exceeded"
+                    if tag != "probe":
+                        self.exhausted = True               # loop will discard this round and pause
+                        self.stats["pauses"] += 1
+                    return None, "usage-limit"
                 time.sleep(min(wait, 5.0))
                 continue
             self.stats["calls"] += 1

@@ -293,13 +293,20 @@ def _progress_hook(job: Job, total: int, label: str = ""):
     return on_round
 
 
+def _wait_hook(job: Job):
+    def on_wait(remaining: int):
+        job.progress["label"] = f"사용 한도 대기 (다음 확인 {remaining}s 후)"
+    return on_wait
+
+
 def _job_run(job: Job) -> None:
-    from ..engine.loop import Simulation
+    from ..engine.loop import Simulation, run_until_done
     p = job.params
     cfg, pop, chan, backend, dm = _setup_sim(job)
     out = ROOT / "runs" / p["name"]
     sim = Simulation(cfg, pop, chan, backend, out, dm, log=job.log)
-    sim.run(resume=bool(p.get("resume")), should_stop=job.stop_event.is_set, on_round=_progress_hook(job, cfg.rounds))
+    run_until_done(sim, resume=bool(p.get("resume")), should_stop=job.stop_event.is_set,
+                   on_round=_progress_hook(job, cfg.rounds), retry_s=int(p.get("retry_s") or 600), on_wait=_wait_hook(job))
     backend.close()
     job.progress["done"] = True
 
@@ -318,8 +325,10 @@ def _job_compare(job: Job) -> None:
         c.backend, c.paths, c.rounds = cfg.backend, cfg.paths, cfg.rounds
         pop.reset_dynamic(pop.initial_state)
         job.log(f"[web] === {sub} ===")
-        Simulation(c, pop, chan, backend, out / sub, dm, log=job.log).run(
-            resume=bool(p.get("resume")), should_stop=job.stop_event.is_set, on_round=_progress_hook(job, cfg.rounds, sub))
+        from ..engine.loop import run_until_done
+        run_until_done(Simulation(c, pop, chan, backend, out / sub, dm, log=job.log),
+                       resume=bool(p.get("resume")), should_stop=job.stop_event.is_set,
+                       on_round=_progress_hook(job, cfg.rounds, sub), retry_s=int(p.get("retry_s") or 600), on_wait=_wait_hook(job))
     backend.close()
     md = render_markdown(out / "defender_on", DisplayMap(), compare_with=out / "defender_off")
     (out / "report.md").write_text(md, encoding="utf-8")

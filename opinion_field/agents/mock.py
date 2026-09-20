@@ -12,19 +12,35 @@ from .backend import AgentBackend, L2Request
 class MockBackend(AgentBackend):
     name = "mock"
 
-    def __init__(self, seed: int = 0, share_rate: float = 0.25, batch_size: int = 1, fail: bool = False):
+    def __init__(self, seed: int = 0, share_rate: float = 0.25, batch_size: int = 1, fail: bool = False,
+                 exhaust_after: int | None = None, probes_to_recover: int = 1):
         self.seed = seed
         self.share_rate = share_rate
         self.batch_size = max(1, int(batch_size))
         self.fail = fail                      # simulate a broken strategist → engine must fall back
+        self.exhaust_after = exhaust_after    # simulate a usage limit after N generate() calls
+        self.probes_to_recover = probes_to_recover
+        self.exhausted = False
         self.calls = 0
         self.n_requests = 0
+        self.probes = 0
+
+    def probe(self) -> bool:
+        self.probes += 1
+        if self.probes >= self.probes_to_recover:
+            self.exhausted = False
+            self.exhaust_after = None
+            return True
+        return False
 
     def generate(self, system: str, user: str, schema: dict[str, Any], *, model: str | None = None,
                  context: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str | None]:
         self.calls += 1
         ctx = context or {}
         kind = ctx.get("kind")
+        if self.exhaust_after is not None and self.calls > self.exhaust_after:
+            self.exhausted = True
+            return None, "usage-limit"
         if kind == "l2_batch":
             reqs: list[L2Request] = ctx["requests"]
             self.n_requests += len(reqs)

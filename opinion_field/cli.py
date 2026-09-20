@@ -54,10 +54,13 @@ def _setup(a, overrides: dict | None = None):
 
 
 def cmd_run(a):
-    from .engine.loop import Simulation
+    from .engine.loop import Simulation, run_until_done
     cfg, pop, chan, backend, dm = _setup(a, _parse_set(a.set))
     sim = Simulation(cfg, pop, chan, backend, a.out, dm)
-    sim.run(resume=a.resume)
+    if a.no_wait_on_limit:
+        sim.run(resume=a.resume)
+    else:
+        run_until_done(sim, resume=a.resume, retry_s=a.retry_s)
     backend.close()
     print(f"run complete → {a.out}")
 
@@ -129,6 +132,8 @@ def main(argv=None):
     r = sp.add_parser("run", help="run a campaign")
     common(r)
     r.add_argument("--resume", action="store_true")
+    r.add_argument("--no-wait-on-limit", action="store_true", help="stop instead of waiting when the usage window closes")
+    r.add_argument("--retry-s", type=int, default=600, help="seconds between usage-window probes while paused")
     r.set_defaults(fn=cmd_run)
 
     c = sp.add_parser("compare-defender", help="same seed, defender on vs off, comparison report")

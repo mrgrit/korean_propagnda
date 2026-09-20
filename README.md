@@ -98,7 +98,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 | `cc` | `claude -p --output-format json --json-schema … --tools "" --model haiku` | 구독 세션 사용량 | 기본 실행 (API 과금 없음) |
 | `api` | Anthropic Message Batches(50% 가격) 또는 realtime, Haiku 기본 | API 과금 | 규모 확장 시 |
 
-`cc` 백엔드는 **이 환경에 로그인된 계정 하나**만 쓴다. 한도 도달 시 지수 백오프로 대기하고, `max_wait_s`를 넘기면 해당 요청을 `source=fallback`(변화 없음)으로 기록해 라운드가 체크포인트되도록 한다. 이후 `--resume`으로 이어서 돌린다.
+`cc` 백엔드는 **이 환경에 로그인된 계정 하나**만 쓴다. 사용 한도에 걸리면 지수 백오프로 기다리고, `max_wait_s`(기본 120초)를 넘겨도 닫혀 있으면 **진행 중이던 라운드를 버리고 직전 체크포인트 상태로 일시정지**한다(폴백으로 라운드를 오염시키지 않음). 웹 작업 큐와 `opinion-field run`은 10분마다 짧은 탐침 호출로 창이 다시 열렸는지 확인하고, 열리면 체크포인트를 복원해 같은 시드·RNG로 버린 라운드부터 이어서 돈다(Max 플랜은 5시간 창). 대기 중에도 중지 버튼은 동작한다. 수동 재개는 `--resume` / UI "체크포인트에서 재개".
 
 > **약관 확인 결과(code.claude.com/docs/en/legal-and-compliance)**: 구독자 본인이 자기 Claude Code를 헤드리스로 자동화하는 것은 허용(ordinary use). **여러 구독 계정의 사용량을 합치거나 한도를 우회하도록 라우팅하는 것은 불허.** 그래서 이 저장소에는 다계정 디스패처가 없고, 추가해서도 안 된다. 처리량이 더 필요하면 `api` 백엔드(배치당 최대 10만 요청)를 쓴다.
 
@@ -145,7 +145,7 @@ backend: {kind: cc, model: haiku, concurrency: 4, timeout_s: 120, max_wait_s: 90
 
 기본 설정(윤리 0.5, 방어 0.5, 예산 300만/20라운드) 100만 명 mock 실행: 후보 A 결정층 지지율 0.4977 → 0.5148(방어 on) / 0.5162(방어 off). 방어 강도 0.9·정정 예산 비율 1.0·윤리 0.9 에서는 0.5103 / 0.5172 로 방어자가 상승분의 약 35%를 막는다. 셀 단위 리터러시–순이동률 상관은 r ≈ −0.37 ~ −0.46. 방어자의 효과 크기는 `defender.strength`, `defender.budget_ratio`, `defender.revert_base` 로 조절한다. 결과는 `runs/cmp1m*/report.md` 참고.
 
-**CC 백엔드 처리량 추정**: 호출당 ~5 s, `concurrency: 6` 이면 라운드당 600건(K=500 + k_l3=100)에 약 9분, 20라운드 ≈ 3시간. 이 시간은 구독 계정 하나의 사용 한도 안에서 소화되어야 하며 한도에 걸리면 백오프 → 폴백 → 체크포인트 → `--resume` 으로 이어 간다. 스모크 테스트용 합성 인구는 `data/processed_synth20k` (`--data data/processed_synth20k --set promotion.k=4`).
+**CC 백엔드 처리량 실측 (P1 배치)**: K=1000 + L3 200 = 라운드당 LLM 에이전트 1,200명, 배치 10 → 호출 120회, 워커 8 → 호출당 약 17 s, 라운드당 약 4.5분, 20라운드 ≈ 90분 (Max 플랜 계정 1개, 100만 인구, 폴백 0). 배치 없이(1명/호출)는 약 5 s/호출이지만 호출 수가 10배다. 스모크 테스트용 합성 인구는 `data/processed_synth20k` (`--data data/processed_synth20k --set promotion.k=4`).
 
 ## P1 (진행 중)
 

@@ -29,7 +29,8 @@ STATIC = Path(__file__).parent / "static"
 ROOT = Path(os.environ.get("OPINION_FIELD_ROOT", ".")).resolve()
 RUN_NAME_RX = re.compile(r"^[A-Za-z0-9_\-]{1,40}$")
 FILE_KINDS = {"campaign": "configs/campaign.yaml", "priors": "configs/priors.yaml",
-              "channels": "configs/channels.yaml", "display_map": "configs/display_map.yaml"}
+              "channels": "configs/channels.yaml", "display_map": "configs/display_map.yaml",
+              "tone_bank": "configs/tone_bank.yaml"}
 
 app = FastAPI(title="K-Propaganda", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
@@ -323,6 +324,50 @@ def _job_compare(job: Job) -> None:
     md = render_markdown(out / "defender_on", DisplayMap(), compare_with=out / "defender_off")
     (out / "report.md").write_text(md, encoding="utf-8")
     job.progress["done"] = True
+
+
+def _job_tone(job: Job) -> None:
+    from ..agents.backend import build_backend
+    from ..config import DataPaths
+    from ..data.tone_bank import build_tone_bank
+    p = job.params
+    cfg = load_campaign(ROOT / FILE_KINDS["campaign"])
+    if p.get("backend_kind"):
+        cfg.backend = {**cfg.backend, "kind": p["backend_kind"]}
+    paths = DataPaths(processed_dir=p.get("data_dir") or cfg.paths.processed_dir)
+    backend = build_backend(cfg.backend, cfg.seed)
+    job.progress = {"phase": "tone_bank"}
+    res = build_tone_bank(paths, backend, ROOT / FILE_KINDS["tone_bank"], samples=int(p.get("samples") or 20), log=job.log)
+    job.progress.update(done=True, groups_ok=res["groups_ok"], failed=len(res["failed"]))
+
+
+@app.post("/api/tone-bank")
+async def api_tone_bank(request: Request):
+    p = await request.json()
+    d = ROOT / (p.get("data_dir") or "data/processed")
+    if not (d / "personas.parquet").exists():
+        raise HTTPException(400, f"{d} 에 personas.parquet 가 없습니다. 먼저 데이터를 빌드하세요.")
+    job = jobs.submit("tone_bank", p, _job_tone)
+    return job.to_dict()
+
+
+@app.get("/api/memory")
+def api_memory():
+    from ..engine.memory import StrategyMemory
+    cfg = load_campaign(ROOT / FILE_KINDS["campaign"])
+    m = StrategyMemory(ROOT / cfg.manipulator.memory_path)
+    return {"path": cfg.manipulator.memory_path, "runs": m.n_runs, "rounds": m.n_rounds,
+            "manip_summary": m.manip_summary(), "defender_summary": m.defender_summary(),
+            "run_names": list(m.data["runs"].keys())}
+
+
+@app.delete("/api/memory")
+def api_memory_clear():
+    cfg = load_campaign(ROOT / FILE_KINDS["campaign"])
+    p = ROOT / cfg.manipulator.memory_path
+    if p.exists():
+        p.unlink()
+    return {"ok": True}
 
 
 @app.post("/api/build")

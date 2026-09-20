@@ -73,6 +73,8 @@ class ManipulatorParams:
     mode: str = "rule"                  # rule | llm  (P1: LLM strategist picks frame/tier/groups/channels/intensity)
     max_groups: int = 8                 # llm: max target groups per round (of 90 region×age×edu groups)
     history_rounds: int = 8             # llm: rounds of history shown in the brief (in-context learning)
+    use_memory: bool = True             # llm: read/write cross-run strategy memory (aggregates only)
+    memory_path: str = "data/strategy_memory.json"
     n_target_cells: int = 60            # cells targeted per round
     min_cell_size: int = 50
     learn_rate: float = 0.5             # EMA on per-cell yield

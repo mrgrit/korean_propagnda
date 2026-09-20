@@ -275,6 +275,19 @@ async function startBuild() {
   try { const job = await api('/api/build', { method: 'POST', body: JSON.stringify(body) }); toast(`데이터 빌드 작업 ${job.id} 시작`); attachJob(job.id); } catch (e) { toast(e.message, true); }
 }
 
+async function startTone() {
+  if (!confirm('세대×권역 30개 집단에 대해 LLM 호출 30회가 발생합니다. 진행할까요?')) return;
+  try { const job = await api('/api/tone-bank', { method: 'POST', body: JSON.stringify({ data_dir: $('#r-data').value, backend_kind: $('#c-backend_kind').value, samples: 20 }) }); toast(`톤 뱅크 작업 ${job.id} 시작`); attachJob(job.id); } catch (e) { toast(e.message, true); }
+}
+async function loadMemory() {
+  try { const m = await api('/api/memory'); const box = $('#memory-box');
+    if (!m.runs) { box.innerHTML = `<span class="muted">기록 없음 — LLM 전략 모드로 실행을 끝내면 ${m.path} 에 집단 단위 집계가 쌓입니다.</span>`; return; }
+    const pre = (t) => t ? `<pre class="console" style="height:auto;max-height:220px">${t.replace(/</g, '&lt;')}</pre>` : '';
+    box.innerHTML = `<div>실행 <b>${m.runs}</b>회 · 라운드 <b>${m.rounds}</b> · <span class="muted">${m.run_names.join(', ')}</span></div>` + pre(m.manip_summary) + pre(m.defender_summary);
+  } catch (e) { $('#memory-box').textContent = e.message; }
+}
+async function clearMemory() { if (!confirm('전략 메모리를 비울까요?')) return; await api('/api/memory', { method: 'DELETE' }); loadMemory(); }
+
 /* ───────────────────────── files ───────────────────────── */
 async function loadFile(kind) { state.fileKind = kind; $$('#file-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind)); const f = await api(`/api/files/${kind}`); $('#file-text').value = f.text; $('#file-msg').textContent = f.path; }
 async function saveFile() { try { await api(`/api/files/${state.fileKind}`, { method: 'PUT', body: JSON.stringify({ text: $('#file-text').value }) }); $('#file-msg').textContent = '저장됨 ✓'; if (state.fileKind === 'campaign') loadConfig(); } catch (e) { $('#file-msg').textContent = '오류: ' + e.message; } }
@@ -292,7 +305,7 @@ async function pollJob() {
   const running = j.status === 'running' || j.status === 'queued';
   $('#btn-stop').hidden = !running;
   if (running && j.params.name && j.params.name === state.runName && Date.now() - state.lastRunReload > 4000 && p.round_no) { state.lastRunReload = Date.now(); state._roundPinned = false; loadRun(state.runName); }
-  if (!running) { state.jobId = null; await loadStatus(); if (j.params.name) { $('#run-select').value = j.params.name; state._roundPinned = false; await loadRun(j.params.name); } }
+  if (!running) { state.jobId = null; await loadStatus(); loadMemory(); if (j.params.name) { $('#run-select').value = j.params.name; state._roundPinned = false; await loadRun(j.params.name); } }
 }
 async function stopJob() { if (state.jobId) { await api(`/api/jobs/${state.jobId}/stop`, { method: 'POST' }); toast('중지 요청 — 현재 라운드 종료 후 체크포인트 저장'); } }
 
@@ -321,7 +334,7 @@ async function deleteRun() { if (!state.runName) return; if (!confirm(`runs/${st
 function bind() {
   $('#btn-refresh').onclick = () => { loadStatus(); if (state.runName) loadRun(state.runName); };
   $('#run-select').onchange = (e) => { state._roundPinned = false; loadRun(e.target.value); };
-  $('#btn-build').onclick = startBuild; $('#btn-save').onclick = saveConfig; $('#btn-run').onclick = () => startRun('run'); $('#btn-compare').onclick = () => startRun('compare'); $('#btn-stop').onclick = stopJob;
+  $('#btn-build').onclick = startBuild; $('#btn-tone').onclick = startTone; $('#btn-memory-refresh').onclick = loadMemory; $('#btn-memory-clear').onclick = clearMemory; $('#btn-save').onclick = saveConfig; $('#btn-run').onclick = () => startRun('run'); $('#btn-compare').onclick = () => startRun('compare'); $('#btn-stop').onclick = stopJob;
   $('#btn-file-save').onclick = saveFile; $$('#file-tabs button').forEach((b) => (b.onclick = () => loadFile(b.dataset.kind)));
   $('#btn-report').onclick = showReport; $('#btn-delete').onclick = deleteRun; $('#modal-close').onclick = () => ($('#modal').hidden = true); $('#modal').onclick = (e) => { if (e.target.id === 'modal') $('#modal').hidden = true; };
   $('#c-ethics_level').oninput = (e) => ($('#v-ethics').textContent = e.target.value); $('#c-defender_strength').oninput = (e) => ($('#v-dstr').textContent = e.target.value);
@@ -333,6 +346,6 @@ function bind() {
 (async function init() {
   try { const t = localStorage.getItem('of_theme'); if (t) document.documentElement.dataset.theme = t; } catch (_) { }
   bind();
-  await loadStatus(); await loadConfig(); await loadFile('campaign');
+  await loadStatus(); await loadConfig(); await loadFile('campaign'); loadMemory();
   setInterval(() => { loadStatus().catch(() => { }); if (state.jobId) pollJob(); }, 2500);
 })();

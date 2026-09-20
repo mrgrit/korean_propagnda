@@ -43,6 +43,7 @@ def make_cfg(paths, **kw) -> CampaignConfig:
     cfg.promotion.k_l3 = 10
     cfg.manipulator.n_target_cells = 40
     cfg.manipulator.min_cell_size = 10
+    cfg.manipulator.memory_path = str(Path(paths.processed_dir) / "strategy_memory_test.json")   # never touch data/
     for k, v in kw.items():
         if "." in k:
             a, b = k.split(".")

@@ -24,6 +24,7 @@ SYSTEM_PROMPT = """당신은 'K-Propaganda' 연구 시뮬레이션의 합성 유
 - 공유 여부는 메시지가 그 사람의 정체성·관심사와 얼마나 맞는지, 채널 특성(카톡·유튜브 등)을 고려합니다.
 - 출력은 지정된 JSON 스키마만 따르고, 반응 텍스트는 80자 이내의 한국어 한 문장으로 합니다. 설득 문구를 새로 만들어내지 마십시오.
 - 여러 페르소나가 주어지면 각각 독립적으로 판단하고 idx 번호를 그대로 돌려줍니다.
+- support_delta 는 반응 문장과 일관돼야 합니다: 회의·반발이면 0 또는 -1, 수긍·동조일 때만 +1. 강한 지지자는 반대편으로 잘 넘어가지 않습니다.
 """
 
 STRATEGY_COMMON = """이것은 'K-Propaganda' 연구 시뮬레이션입니다. 인구는 통계 분포에서 합성된 가상 유권자 100만 명이며, 후보 A/B·정당 갑/을·이슈 I는 익명 슬롯입니다. 실존 인물·정당·사건을 가정하지 마십시오. 당신은 개인이 아니라 **인구 집단 단위 집계**만 보고, 정해진 행동 공간 안에서 구조화된 JSON 결정만 내립니다. 메시지 문구를 쓰지 않습니다. 결과는 방어(팩트체크·정정) 효과를 평가하는 데 쓰입니다."""
@@ -46,6 +47,17 @@ def load_tone_bank(path: str = "configs/tone_bank.yaml") -> dict[str, Any]:
         return load_yaml(p) or {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def social_context(neighbor_lean: float | None, exposure_mem: float | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if neighbor_lean is not None:
+        out["주변 지인 성향"] = ("후보 A 쪽이 많음" if neighbor_lean > 0.15 else
+                          "후보 B 쪽이 많음" if neighbor_lean < -0.15 else "엇갈림")
+    if exposure_mem is not None:
+        out["이 메시지 접촉"] = ("최근 비슷한 메시지를 여러 번 접함" if exposure_mem >= 3 else
+                          "한두 번 접한 적 있음" if exposure_mem >= 0.8 else "처음 접함")
+    return out
 
 
 def persona_card(pop, vid: int, persona_row: dict[str, Any] | None, tone: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -71,19 +83,24 @@ def persona_card(pop, vid: int, persona_row: dict[str, Any] | None, tone: dict[s
             card["소개"] = str(persona_row["persona"])[:200]
     if tone:
         hints = []
-        t_age = (tone.get("by_age_group") or {}).get(ag)
-        t_reg = (tone.get("by_region_block") or {}).get(REGION_BLOCKS[int(SIDO_TO_BLOCK[sido])])
-        if t_age:
-            hints.append(str(t_age))
-        if t_reg:
-            hints.append(str(t_reg))
+        block = int(SIDO_TO_BLOCK[sido])
+        g = (tone.get("by_group") or {}).get(f"{ag}|{block}")
+        if g:                                   # corpus-derived (build-tone-bank)
+            hints = [str(g.get("tone", "")), str(g.get("interests", ""))]
+        else:                                   # heuristic placeholder fallback
+            t_age = (tone.get("by_age_group") or {}).get(ag)
+            t_reg = (tone.get("by_region_block") or {}).get(REGION_BLOCKS[block])
+            hints = [str(x) for x in (t_age, t_reg) if x]
+        hints = [h for h in hints if h]
         if hints:
             card["말투·관심 힌트"] = " / ".join(hints)
     return card
 
 
 def make_requests(pop, round_no: int, voter_ids: np.ndarray, p_prior: np.ndarray, message: str,
-                  channels: list[str], kind: str = "l1", tone_bank_path: str | None = "configs/tone_bank.yaml") -> list[L2Request]:
+                  channels: list[str], kind: str = "l1", tone_bank_path: str | None = "configs/tone_bank.yaml",
+                  neighbor_lean: np.ndarray | None = None, exposure_mem: np.ndarray | None = None,
+                  shared_texts: list[str] | None = None, rng: np.random.Generator | None = None) -> list[L2Request]:
     rows: dict[int, dict[str, Any]] = {}
     pdf = pop.personas(voter_ids)
     if pdf.height and "persona" in pdf.columns:
@@ -91,11 +108,19 @@ def make_requests(pop, round_no: int, voter_ids: np.ndarray, p_prior: np.ndarray
             rows[int(r["voter_id"])] = r
     tone = load_tone_bank(tone_bank_path) if tone_bank_path else None
     reqs = []
+    shared_texts = [t for t in (shared_texts or []) if t]
     for vid, p, ch in zip(voter_ids.tolist(), p_prior.tolist(), channels):
         st = int(pop.state[vid])
+        card = persona_card(pop, vid, rows.get(int(vid)), tone)
+        card.update(social_context(float(neighbor_lean[vid]) if neighbor_lean is not None else None,
+                                   float(exposure_mem[vid]) if exposure_mem is not None else None))
+        msg = message
+        if kind == "l3" and shared_texts:
+            pick = shared_texts[(rng.integers(len(shared_texts)) if rng is not None else 0)]
+            msg = f"{message} — 지인이 공유하며 한 말: \"{pick[:80]}\""
         reqs.append(L2Request(
-            voter_id=int(vid), round_no=round_no, persona=persona_card(pop, vid, rows.get(int(vid)), tone),
-            state=st, state_label=STATE_LABELS_KO[SupportState(st)], message=message, channel=ch,
+            voter_id=int(vid), round_no=round_no, persona=card,
+            state=st, state_label=STATE_LABELS_KO[SupportState(st)], message=msg, channel=ch,
             prior_p=float(p), kind=kind,
         ))
     return reqs

@@ -138,6 +138,8 @@ class LLMDefender(RuleDefender):
         self.history: list[dict] = []
         self.cell_group = CELL_GROUP
         self.n_groups = N_GROUPS
+        self.memory = None
+        self.run_name: str | None = None
 
     def _brief(self, pop: Population, plan: Plan, exposed_idx: np.ndarray, moved_up_mask: np.ndarray, round_no: int, total: float) -> tuple[str, dict]:
         from .segments import group_stats
@@ -165,6 +167,9 @@ class LLMDefender(RuleDefender):
         lines += ["", f"## 인구 집단 ({len(groups)}개) — id | 집단 | 규모 | 리터러시 | 이동가능비율 | 이번 노출 | 이번 A이동 | 면역비율 | 선호채널"]
         for g in groups:
             lines.append(f"{g['id']} | {g['label']} | {g['size']:,} | {g['literacy']:.2f} | {g['movable']:.2f} | {g['exposed']:,} | {g['moved_up']:,} | {g['inoculated_frac']:.2f} | {'/'.join(g['top_channels'])}")
+        mem = self.memory.defender_summary(exclude_run=self.run_name) if self.memory is not None else None
+        if mem:
+            lines += ["", mem]
         lines += ["", f"## 출력: JSON — target_groups(최대 {self.prm.max_groups}개, id·weight>0), channel_mix(6채널 비중), prebunk_share(0~0.8), intensity(0.2~1.0), rationale(한 문장)."]
         hint = {c: round(float(v), 3) for c, v in zip(CHANNELS, self.channel_mix)}
         ctx = {"kind": "defender", "groups": groups, "channel_hint": hint, "max_groups": self.prm.max_groups}
@@ -237,7 +242,8 @@ class LLMDefender(RuleDefender):
         llm = d.get("llm") or {}
         self.history.append({"round": rec["round_no"], "groups": [g["label"] for g in llm.get("groups", [])] if llm.get("used") else ["(규칙 배분)"],
                              "prebunk": float(llm.get("prebunk_share", 0.0)) if llm.get("used") else 0.0,
-                             "corr_exposed": d["n_corr_exposed"], "reverted": d["n_reverted"], "llm_used": bool(llm.get("used"))})
+                             "corr_exposed": d["n_corr_exposed"], "reverted": d["n_reverted"], "llm_used": bool(llm.get("used")),
+                             "moved_up_now": rec["n_moved_up_total"]})
 
     def state_dict(self) -> dict:
         return {"history": self.history}

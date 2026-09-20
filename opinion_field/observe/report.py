@@ -124,6 +124,19 @@ def render_markdown(run_dir: str | Path, display_map: DisplayMap | None = None, 
         lv = literacy_vulnerability(segments)
         lines += ["", "## 취약성: 리터러시 vs 순이동률",
                   f"- 셀 단위 Pearson r = {lv['pearson_r']:.3f} (n_cells={lv['n_cells']})" if lv["pearson_r"] is not None else "- 계산 불가", ""]
+    llm_rounds = [r for r in rounds if (r["manipulator"].get("llm") or {}).get("used") or (r["defense"].get("llm") or {}).get("used")]
+    if llm_rounds:
+        sm = manifest.get("strategy_memory") or {}
+        lines += ["## 전략가 결정 (P1 LLM)", "",
+                  f"- 누적 전략 메모리: {sm.get('runs_seen', 0)}회 실행 / {sm.get('rounds_seen', 0)}라운드 참고 ({sm.get('path', '-')})", ""]
+        for r in llm_rounds:
+            ml = r["manipulator"].get("llm") or {}
+            dl = r["defense"].get("llm") or {}
+            if ml.get("used"):
+                lines.append(f"- R{r['round_no']} 조작 전략가({ml.get('model', '')}): 강도 {ml.get('intensity')}, 집단 {', '.join(g['label'] for g in ml.get('groups', [])[:4])} — {ml.get('rationale', '')}")
+            if dl.get("used"):
+                lines.append(f"- R{r['round_no']} 방어 전략가: 예방접종 {dl.get('prebunk_share', 0):.0%}, 집단 {', '.join(g['label'] for g in dl.get('groups', [])[:4])} — {dl.get('rationale', '')}")
+        lines.append("")
     lines += ["## 라운드별 조작 vs 방어 로그", ""]
     for r in rounds:
         m = r["manipulator"]

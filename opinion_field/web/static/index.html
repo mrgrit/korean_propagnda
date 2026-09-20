@@ -29,7 +29,16 @@
         <label>출력 폴더 <input id="b-out" type="text" placeholder="data/processed"></label>
         <label>시드 <input id="b-seed" type="number" value="20260920"></label>
       </div>
-      <button id="btn-build" class="secondary">데이터 빌드</button>
+      <div class="btn-row">
+        <button id="btn-build" class="secondary">데이터 빌드</button>
+        <button id="btn-tone" class="secondary" title="Nemotron 페르소나 코퍼스에서 세대×권역 말투·관심 힌트를 LLM으로 추출 (30회 호출)">톤 뱅크 생성 (P1)</button>
+      </div>
+    </details>
+
+    <details>
+      <summary>전략 메모리 (P1 누적 학습)</summary>
+      <div id="memory-box" class="plan-box"></div>
+      <div class="btn-row"><button id="btn-memory-refresh" class="ghost">새로고침</button><button id="btn-memory-clear" class="ghost danger-text">메모리 비우기</button></div>
     </details>
 
     <details open>
@@ -85,6 +94,7 @@
         <button data-kind="priors">priors</button>
         <button data-kind="channels">channels</button>
         <button data-kind="display_map">display_map</button>
+        <button data-kind="tone_bank">tone_bank</button>
       </div>
       <textarea id="file-text" spellcheck="false" rows="18"></textarea>
       <div class="btn-row"><button id="btn-file-save" class="secondary">파일 저장</button><span id="file-msg" class="muted"></span></div>

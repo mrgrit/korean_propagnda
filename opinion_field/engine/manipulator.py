@@ -189,6 +189,8 @@ class LLMManipulator(RuleManipulator):
         self.last_up_cells = np.zeros(N_CELLS)
         self.cell_group = CELL_GROUP
         self.n_groups = N_GROUPS
+        self.memory = None                  # StrategyMemory, attached by the loop (cross-run learning)
+        self.run_name: str | None = None
 
     # ---- brief -------------------------------------------------------------
     def _brief(self, pop: Population, round_no: int, rule_plan: Plan) -> tuple[str, dict]:
@@ -217,6 +219,9 @@ class LLMManipulator(RuleManipulator):
         lines += ["", "## 프레임별 세대 친화도 (19-29/30/40/50/60/70+)"]
         for fi, f in enumerate(FRAMES):
             lines.append(f"{f} ({FRAME_LABELS_KO[f]}): " + " ".join(f"{v:.2f}" for v in self.chan.frame_affinity[fi]))
+        mem = self.memory.manip_summary(exclude_run=self.run_name) if (self.memory is not None and self.prm.use_memory) else None
+        if mem:
+            lines += ["", mem]
         lines += ["", f"## 규칙 기반 기본안 (참고): frame={rule_plan.frame}, tier={rule_plan.claim_tier}, 상위 셀 {', '.join(rule_plan.summary()['target_cells_label_top5'][:3])}",
                   "", f"## 출력: JSON — frame, claim_tier(≤{max_tier}), target_groups(최대 {self.prm.max_groups}개, id·weight>0), channel_mix(6채널 비중, 합 1), intensity(0.2~1.0), rationale(한 문장)."]
         # context for the mock backend (deterministic plan without parsing text)
@@ -284,7 +289,9 @@ class LLMManipulator(RuleManipulator):
         target = target[np.argsort(-cell_w[target], kind="stable")]
         msg = f"[{FRAME_LABELS_KO[frame]}] ({CLAIM_TIER_LABELS_KO[CLAIM_TIERS[tier]]}) {TEMPLATES[(frame, tier)]}"
         llm = {"used": True, "groups": [{"id": g, "label": group_label(g), "weight": round(w, 3)} for g, w in groups],
-               "intensity": intensity, "rationale": str(d.get("rationale", ""))[:300], "model": getattr(self.backend, "strategy_model", None)}
+               "intensity": intensity, "rationale": str(d.get("rationale", ""))[:300], "model": getattr(self.backend, "strategy_model", None),
+               "memory": ({"runs": self.memory.n_runs - (1 if self.run_name in self.memory.data["runs"] else 0), "rounds": self.memory.n_rounds}
+                          if (self.memory is not None and self.prm.use_memory) else None)}
         return Plan(round_no=round_no, frame=frame, claim_tier=tier, falsehood=tier / 2.0, target_cells=target,
                     cell_impressions=cell_impr, impressions_total=float(cell_impr.sum()), cost=cost, message=msg,
                     channel_mix=mix.astype(np.float32), llm=llm)
@@ -302,7 +309,12 @@ class LLMManipulator(RuleManipulator):
         groups = [g["label"] for g in llm.get("groups", [])] if llm.get("used") else m.get("target_cells_label_top5", [])[:3]
         mix = sorted(m["channel_mix"].items(), key=lambda kv: -kv[1])[:3]
         prev_a = self.history[-1]["A"] if self.history else None
+        # per-group yields of this round (targeted groups only) for cross-run memory
+        ex_g = np.bincount(self.cell_group, weights=self.last_exposed_cells, minlength=self.n_groups)
+        up_g = np.bincount(self.cell_group, weights=self.last_up_cells, minlength=self.n_groups)
+        group_yield = {group_label(g): [int(ex_g[g]), int(up_g[g])] for g in np.flatnonzero(ex_g > 0)}
         self.history.append({
+            "group_yield": group_yield,
             "round": rec["round_no"], "frame": m["frame"], "tier": m["claim_tier"], "groups": groups,
             "channels": "/".join(f"{c}:{v:.2f}" for c, v in mix), "exposed": rec["exposure"]["n_exposed"],
             "moved_up": rec["n_moved_up_total"], "detected": rec["defense"]["detected"], "reverted": rec["defense"]["n_reverted"],

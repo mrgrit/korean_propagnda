@@ -51,6 +51,8 @@ class MockBackend(AgentBackend):
             return {"target_groups": [{"id": g["id"], "weight": float(g["exposed"]) or 1.0} for g in groups],
                     "channel_mix": ctx["channel_hint"], "prebunk_share": 0.3, "intensity": 1.0,
                     "rationale": "mock: 노출 상위 집단에 정정, 30%는 예방접종"}, None
+        if kind == "tone":
+            return {"tone": f"mock 톤 (age {ctx.get('age')}, block {ctx.get('block')})", "interests": "mock 관심사"}, None
         return None, f"mock: unknown kind {kind}"
 
     def usage(self) -> dict:

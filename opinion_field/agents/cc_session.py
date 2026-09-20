@@ -44,7 +44,7 @@ class CCSessionBackend(AgentBackend):
                  claude_bin: str = "claude", config_dir: str | None = None, max_wait_s: int = 900,
                  backoff_s: int = 30, max_budget_usd: float | None = None, max_turns: int = 3,
                  debug_dir: str | None = None, thinking_tokens: int = 0, batch_size: int = 8,
-                 strategy_model: str | None = "sonnet", strategy_thinking_tokens: int = 4096):
+                 strategy_model: str | None = "sonnet", strategy_thinking_tokens: int = 2048):
         self.model = model
         self.concurrency = max(1, int(concurrency))
         self.timeout_s = timeout_s

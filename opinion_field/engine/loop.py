@@ -18,6 +18,7 @@ from .defender import LLMDefender, RuleDefender
 from .l1 import apply_moves, sample_moves, transition_probs
 from .l3 import apply_l3, propagate
 from .manipulator import LLMManipulator, RuleManipulator
+from .memory import StrategyMemory
 from .population import LEAN, STEP_DOWN, STEP_UP, Population
 from .promote import select_promoted
 
@@ -45,6 +46,16 @@ class Simulation:
             self.defender = LLMDefender(cfg.defender, chan, backend, pop, self.manip)
         else:
             self.defender = RuleDefender(cfg.defender, chan)
+        # cross-run strategy memory (aggregates only) — read by LLM strategists, written at run end
+        self.memory = None
+        if cfg.manipulator.use_memory and (cfg.manipulator.mode == "llm" or cfg.defender.mode == "llm"):
+            self.memory = StrategyMemory(cfg.manipulator.memory_path)
+            run_name = str(Path(out_dir).resolve().relative_to(Path("runs").resolve())) if Path("runs").resolve() in Path(out_dir).resolve().parents else Path(out_dir).name
+            for agent in (self.manip, self.defender):
+                if hasattr(agent, "memory"):
+                    agent.memory = self.memory
+                    agent.run_name = run_name
+            self.run_name = run_name
         self.round_no = 0
         self.cost_cum = 0.0
         self.cost_def_cum = 0.0
@@ -65,6 +76,7 @@ class Simulation:
                 self.stopped = True
                 self.save_checkpoint()
                 self.logger.flush_segments()
+                self._record_memory()
                 self.logger.write_manifest(dict(self.manifest(), stopped=True))
                 self.log(f"[sim] stopped after round {self.round_no} (checkpoint saved; resume to continue)")
                 return records
@@ -79,8 +91,18 @@ class Simulation:
             if self.cfg.checkpoint_every and self.round_no % self.cfg.checkpoint_every == 0:
                 self.save_checkpoint()
         self.logger.flush_segments()
+        self._record_memory()
         self.logger.write_manifest(self.manifest(final=True))
         return records
+
+    def _record_memory(self) -> None:
+        """Write this run's group-level strategist history into the cross-run memory (aggregates only)."""
+        if self.memory is None:
+            return
+        self.memory.record_run(self.run_name, list(getattr(self.manip, "history", [])), list(getattr(self.defender, "history", [])),
+                               {"ethics_level": self.cfg.ethics_level, "defender_strength": self.cfg.defender.strength,
+                                "rounds": self.round_no, "seed": self.cfg.seed, "n_voters": self.pop.n,
+                                "manip_mode": self.cfg.manipulator.mode, "defender_mode": self.cfg.defender.mode})
 
     # ----------------------------------------------------------------- step
     def step(self) -> dict[str, Any]:
@@ -106,7 +128,8 @@ class Simulation:
         pos = select_promoted(pop, cfg.promotion, ex.idx, p_up, cfg.promotion.k, rng)
         promoted = ex.idx[pos]
         ch_idx = np.argmax(pop.reach[promoted] * plan.channel_mix[None, :], axis=1) if len(promoted) else np.empty(0, int)
-        reqs = make_requests(pop, rno, promoted, p_up[pos], plan.message, [CHANNELS[c] for c in ch_idx], kind="l1")
+        reqs = make_requests(pop, rno, promoted, p_up[pos], plan.message, [CHANNELS[c] for c in ch_idx], kind="l1",
+                             neighbor_lean=neighbor_lean, exposure_mem=pop.exposure_mem)
         # 5. L2 agent reactions (backend call, batched) ----------------------------
         t_l2 = time.time()
         resps = self.backend.react(reqs) if reqs else []
@@ -134,7 +157,9 @@ class Simulation:
             promoted3 = l3.idx[pos3]
             social_ch = ["kakao" if pop.reach[v, CHANNELS.index("kakao")] >= pop.reach[v, CHANNELS.index("wom")] else "wom"
                          for v in promoted3]
-            reqs3 = make_requests(pop, rno, promoted3, l3.p[pos3], plan.message + " (지인이 공유한 내용)", social_ch, kind="l3")
+            shared_texts = [r.reaction for r in resps if r.share and r.reaction]
+            reqs3 = make_requests(pop, rno, promoted3, l3.p[pos3], plan.message + " (지인이 공유한 내용)", social_ch, kind="l3",
+                                  neighbor_lean=neighbor_lean, exposure_mem=pop.exposure_mem, shared_texts=shared_texts, rng=rng)
             t_l2 = time.time()
             resps3 = self.backend.react(reqs3)
             l2_elapsed += time.time() - t_l2
@@ -213,6 +238,8 @@ class Simulation:
     def manifest(self, final: bool = False) -> dict[str, Any]:
         return {"config": self.cfg.to_dict(), "data": self.data_manifest,
                 "backend": {"name": self.backend.name, "spec": self.cfg.backend, "usage": self.backend.usage()},
+                "strategy_memory": ({"path": str(self.memory.path), "runs_seen": self.memory.n_runs, "rounds_seen": self.memory.n_rounds}
+                                    if self.memory is not None else None),
                 "started_at": getattr(self, "_started", time.strftime("%Y-%m-%dT%H:%M:%S")),
                 "finished": final, "rounds_done": self.round_no, "goal_round": self.goal_round,
                 "note": "engine/log outputs use anonymous slot labels only (§4.4/§10)"}

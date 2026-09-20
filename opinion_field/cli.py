@@ -79,6 +79,19 @@ def cmd_compare_defender(a):
     print(md)
 
 
+def cmd_build_tone_bank(a):
+    from .agents.backend import build_backend
+    from .config import DataPaths
+    from .data.tone_bank import build_tone_bank
+    cfg = load_campaign(a.campaign)
+    if a.backend:
+        cfg.backend = {**cfg.backend, "kind": a.backend}
+    paths = DataPaths(processed_dir=a.data or cfg.paths.processed_dir)
+    backend = build_backend(cfg.backend, cfg.seed)
+    res = build_tone_bank(paths, backend, a.out, samples=a.samples, seed=a.seed)
+    print(json.dumps({k: v for k, v in res.items() if k != "failed"}, ensure_ascii=False))
+
+
 def cmd_web(a):
     from .web.app import serve
     serve(host=a.host, port=a.port, root=a.root)
@@ -129,6 +142,15 @@ def main(argv=None):
     rp.add_argument("--display-map", default=None, help="configs/display_map.yaml — render-time only")
     rp.add_argument("--out", default=None)
     rp.set_defaults(fn=cmd_report)
+
+    tb = sp.add_parser("build-tone-bank", help="P1: derive configs/tone_bank.yaml from the Korean persona corpus via the LLM backend")
+    tb.add_argument("--campaign", default="configs/campaign.yaml")
+    tb.add_argument("--data", default=None)
+    tb.add_argument("--backend", choices=["mock", "cc", "api"], default=None)
+    tb.add_argument("--out", default="configs/tone_bank.yaml")
+    tb.add_argument("--samples", type=int, default=20)
+    tb.add_argument("--seed", type=int, default=0)
+    tb.set_defaults(fn=cmd_build_tone_bank)
 
     w = sp.add_parser("web", help="start the local web UI (everything else is done in the browser)")
     w.add_argument("--host", default="127.0.0.1")

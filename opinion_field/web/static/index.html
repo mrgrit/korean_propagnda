@@ -52,6 +52,8 @@
         <label>L3 2차 승격 <input id="c-promotion_k_l3" type="number" min="0"></label>
         <label>표적 셀 수 <input id="c-manipulator_n_target_cells" type="number" min="1"></label>
         <label>체크포인트 주기 <input id="c-checkpoint_every" type="number" min="0"></label>
+        <label>조작자 전략 <select id="c-manipulator_mode"><option value="rule">규칙 (P0)</option><option value="llm">LLM 전략가 (P1)</option></select></label>
+        <label>방어자 전략 <select id="c-defender_mode"><option value="rule">규칙 (P0)</option><option value="llm">LLM 전략가 (P1)</option></select></label>
       </div>
       <div class="form-grid">
         <label>백엔드 <select id="c-backend_kind">
@@ -61,6 +63,8 @@
         <label>모델 <input id="c-backend_model" type="text" placeholder="haiku"></label>
         <label>동시 워커 <input id="c-backend_concurrency" type="number" min="1" max="32"></label>
         <label>thinking 토큰 <input id="c-backend_thinking_tokens" type="number" min="0"></label>
+        <label>L2 배치 크기 <input id="c-backend_batch_size" type="number" min="1" max="20" title="한 호출에 묶는 페르소나 수"></label>
+        <label>전략가 모델 <input id="c-backend_strategy_model" type="text" placeholder="sonnet"></label>
       </div>
       <div class="btn-row">
         <button id="btn-save" class="secondary">설정 저장</button>

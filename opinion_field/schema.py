@@ -82,6 +82,11 @@ def cell_label(cell: int) -> str:
     return f"{SIDO_CANON[s]}/{AGE_GROUP_LABELS[a]}/{SEX_LABELS[x]}/{EDU_BUCKET_LABELS[e]}"
 
 
+# Coarse region blocks (P1 strategist groups): index aligned with SIDO_CANON
+REGION_BLOCKS = ["수도권", "영남", "호남", "충청", "강원·제주"]
+SIDO_TO_BLOCK = np.array([0, 1, 1, 0, 2, 3, 1, 3, 0, 4, 3, 3, 2, 2, 1, 1, 4], dtype=np.uint8)
+N_BLOCKS = len(REGION_BLOCKS)
+
 # --- channels ---------------------------------------------------------------
 CHANNELS = ["youtube", "portal", "kakao", "instagram", "tv", "wom"]
 CHANNEL_LABELS_KO = {"youtube": "유튜브", "portal": "포털 뉴스", "kakao": "카카오톡",

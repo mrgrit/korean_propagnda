@@ -226,7 +226,11 @@ function renderPlan() {
   const m = rec().manipulator;
   $('#plan-box').innerHTML = `<div><b>${m.frame_ko}</b> · ${m.claim_tier_ko} (허위도 ${m.falsehood})</div><div>${m.message}</div>
     <div>표적 셀 <b>${m.n_target_cells}</b>개 · 노출 <b>${fmtN(m.impressions_total)}</b> · 비용 <b>${fmtN(m.cost)}</b></div>
-    <div class="muted">상위 셀: ${(m.target_cells_label_top5 || []).join(' · ')}</div>`;
+    <div class="muted">상위 셀: ${(m.target_cells_label_top5 || []).join(' · ')}</div>` +
+    (m.llm ? (m.llm.used ? `<div style="margin-top:6px"><b>LLM 전략가</b> (${m.llm.model || ''}) · 강도 ${m.llm.intensity} · 집단: ${(m.llm.groups || []).map((g) => g.label).join(' · ')}<br><i>${m.llm.rationale || ''}</i></div>`
+      : `<div style="margin-top:6px;color:var(--critical)">LLM 전략가 실패 → 규칙 대체 (${m.llm.error || ''})</div>`) : '') +
+    (rec().defense.llm ? (rec().defense.llm.used ? `<div style="margin-top:6px"><b>방어 전략가</b> · 예방접종 ${(rec().defense.llm.prebunk_share * 100).toFixed(0)}% · 집단: ${(rec().defense.llm.groups || []).map((g) => g.label).join(' · ')}<br><i>${rec().defense.llm.rationale || ''}</i></div>`
+      : `<div style="margin-top:6px;color:var(--critical)">방어 전략가 실패 → 규칙 대체</div>`) : '');
 }
 function renderContrib() {
   const c = state.run.contribution; const box = $('#contrib-table');
@@ -237,7 +241,7 @@ function renderContrib() {
     `</tbody></table>` + (lit && lit.pearson_r != null ? `<div class="muted" style="padding:6px 8px">셀 단위 리터러시–순이동률 상관 r = ${fmtP(lit.pearson_r, 3)} (n_cells=${lit.n_cells})</div>` : '');
 }
 function renderBattleLog() {
-  $('#battle-log').innerHTML = state.run.rounds.map((r) => { const m = r.manipulator, d = r.defense; return `<li${r.round_no === state.round ? ' style="color:var(--text-1)"' : ''}><span class="m">조작</span> [${m.frame_ko}/${m.claim_tier_ko}] 셀 ${m.n_target_cells} · 노출 ${fmtN(r.exposure.n_exposed)} · L1↑${fmtN(r.l1.n_up)} L2↑${r.l2.n_delta_up} L3↑${r.l3.n_moved_up} → <span class="${d.detected ? 'd' : 'miss'}">방어 ${d.detected ? `탐지(p=${fmtP(d.p_detect, 2)}) 정정노출 ${fmtN(d.n_corr_exposed)} 되돌림 ${fmtN(d.n_reverted)}` : `미탐지(p=${fmtP(d.p_detect, 2)})`}</span> · A ${fmtPct(r.support.A)}</li>`; }).join('');
+  $('#battle-log').innerHTML = state.run.rounds.map((r) => { const m = r.manipulator, d = r.defense; return `<li${r.round_no === state.round ? ' style="color:var(--text-1)"' : ''}><span class="m">조작</span> [${m.frame_ko}/${m.claim_tier_ko}] 셀 ${m.n_target_cells} · 노출 ${fmtN(r.exposure.n_exposed)} · L1↑${fmtN(r.l1.n_up)} L2↑${r.l2.n_delta_up} L3↑${r.l3.n_moved_up} → <span class="${d.detected ? 'd' : 'miss'}">방어 ${d.detected ? `탐지(p=${fmtP(d.p_detect, 2)}) 정정노출 ${fmtN(d.n_corr_exposed)} 되돌림 ${fmtN(d.n_reverted)}${d.llm && d.llm.used ? ` · 예방접종 ${(d.llm.prebunk_share * 100).toFixed(0)}%` : ''}` : `미탐지(p=${fmtP(d.p_detect, 2)})`}</span> · A ${fmtPct(r.support.A)}${m.llm && m.llm.used ? `<div class="muted" style="margin-left:4px">↳ ${m.llm.rationale || ''}</div>` : ''}</li>`; }).join('');
 }
 function setRound(n) { state.round = n; state._roundPinned = n !== state.run.rounds.length; $('#hm-round').value = n; renderAll(); }
 
@@ -245,7 +249,8 @@ function setRound(n) { state.round = n; state._roundPinned = n !== state.run.rou
 const FIELDS = { 'c-rounds': 'rounds', 'c-seed': 'seed', 'c-budget': 'budget', 'c-goal_margin': 'goal_margin', 'c-ethics_level': 'ethics_level',
   'c-defender_enabled': 'defender.enabled', 'c-defender_strength': 'defender.strength', 'c-defender_budget_ratio': 'defender.budget_ratio', 'c-defender_revert_base': 'defender.revert_base',
   'c-promotion_k': 'promotion.k', 'c-promotion_k_l3': 'promotion.k_l3', 'c-manipulator_n_target_cells': 'manipulator.n_target_cells', 'c-checkpoint_every': 'checkpoint_every',
-  'c-backend_kind': 'backend.kind', 'c-backend_model': 'backend.model', 'c-backend_concurrency': 'backend.concurrency', 'c-backend_thinking_tokens': 'backend.thinking_tokens' };
+  'c-backend_kind': 'backend.kind', 'c-backend_model': 'backend.model', 'c-backend_concurrency': 'backend.concurrency', 'c-backend_thinking_tokens': 'backend.thinking_tokens',
+  'c-manipulator_mode': 'manipulator.mode', 'c-defender_mode': 'defender.mode', 'c-backend_batch_size': 'backend.batch_size', 'c-backend_strategy_model': 'backend.strategy_model' };
 const getPath = (o, p) => p.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o);
 async function loadConfig() {
   const c = await api('/api/config'); state.config = c.config;

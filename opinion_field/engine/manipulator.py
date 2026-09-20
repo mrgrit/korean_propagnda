@@ -48,9 +48,11 @@ class Plan:
     cost: float
     message: str                          # slot-labelled description
     channel_mix: np.ndarray               # (C,) share of impressions
+    llm: dict | None = None               # P1: strategist decision (groups, rationale) or fallback info
 
     def summary(self) -> dict:
         return {
+            "llm": self.llm,
             "frame": self.frame, "frame_ko": FRAME_LABELS_KO[self.frame],
             "claim_tier": CLAIM_TIERS[self.claim_tier], "claim_tier_ko": CLAIM_TIER_LABELS_KO[CLAIM_TIERS[self.claim_tier]],
             "falsehood": round(self.falsehood, 3), "n_target_cells": int(len(self.target_cells)),
@@ -141,8 +143,179 @@ class RuleManipulator:
         lr = self.prm.learn_rate
         self.yield_ema[touched] = (1 - lr) * self.yield_ema[touched] + lr * np.clip(y[touched], 0.2, 3.0)
 
+    def observe(self, rec: dict) -> None:   # P1 hook (rule version keeps no history)
+        pass
+
     def state_dict(self) -> dict:
         return {"yield_ema": self.yield_ema.tolist()}
 
     def load_state_dict(self, d: dict):
         self.yield_ema = np.array(d["yield_ema"], dtype=np.float32)
+
+
+# ============================================================================ P1: LLM strategist
+MANIP_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "frame": {"type": "string", "enum": FRAMES},
+        "claim_tier": {"type": "integer", "enum": [0, 1, 2]},
+        "target_groups": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "integer"}, "weight": {"type": "number"}},
+            "required": ["id", "weight"], "additionalProperties": False}},
+        "channel_mix": {"type": "object", "properties": {c: {"type": "number"} for c in CHANNELS},
+                        "required": list(CHANNELS), "additionalProperties": False},
+        "intensity": {"type": "number", "description": "라운드 예산 사용 비율 0.2~1.0"},
+        "rationale": {"type": "string"},
+    },
+    "required": ["frame", "claim_tier", "target_groups", "channel_mix", "intensity", "rationale"],
+    "additionalProperties": False,
+}
+
+
+class LLMManipulator(RuleManipulator):
+    """P1 manipulator: an LLM strategist chooses frame / claim tier / target groups / channel mix /
+    intensity from GROUP-LEVEL aggregates and its own round history (in-context learning). The
+    rule-based planner remains the baseline and the fallback when the LLM answer is unusable.
+    It never writes message text — content stays the abstract slot-labelled template."""
+
+    def __init__(self, prm, chan, pop, ethics_level, budget_per_round, backend, goal_margin: float, rounds: int):
+        super().__init__(prm, chan, pop, ethics_level, budget_per_round)
+        from .segments import CELL_GROUP, N_GROUPS
+        self.backend = backend
+        self.goal_margin = goal_margin
+        self.rounds = rounds
+        self.history: list[dict] = []
+        self.last_exposed_cells = np.zeros(N_CELLS)
+        self.last_up_cells = np.zeros(N_CELLS)
+        self.cell_group = CELL_GROUP
+        self.n_groups = N_GROUPS
+
+    # ---- brief -------------------------------------------------------------
+    def _brief(self, pop: Population, round_no: int, rule_plan: Plan) -> tuple[str, dict]:
+        from ..schema import CLAIM_TIER_LABELS_KO
+        from .segments import group_stats
+        counts = pop.cell_state_counts().astype(np.float32)
+        movable = (counts * MOVABLE[None, :]).sum(axis=1) / np.maximum(pop.cell_size, 1)
+        groups = group_stats(pop, self.cell_pers, self.cell_lit, self.cell_chan, movable, self.yield_ema,
+                             {"exposed_last": self.last_exposed_cells, "moved_up_last": self.last_up_cells})
+        shares = pop.support_shares()
+        max_tier = self.claim_tier
+        hist = self.history[-self.prm.history_rounds:]
+        lines = [f"# 라운드 {round_no}/{self.rounds} 조작자 전략 브리핑",
+                 f"목표: 후보 A 결정층 지지율 우위 마진 ≥ {self.goal_margin:.3f}. 현재 A {shares['A']:.4f} / B {shares['B']:.4f} (마진 {shares['A']-shares['B']:+.4f}), 부동층(전체) {shares['undecided_all']:.3f}.",
+                 f"윤리 상한: claim_tier ≤ {max_tier} ({CLAIM_TIER_LABELS_KO[CLAIM_TIERS[max_tier]]}). 0=사실기반, 1=오도, 2=허위. 높을수록 설득력↑, 방어 탐지·리터러시 반발↑.",
+                 f"라운드 예산 {self.budget_per_round:,.0f} (채널 노출 단가: " + ", ".join(f"{c} {v:.1f}" for c, v in zip(CHANNELS, self.chan.cpi)) + "). intensity 는 예산 사용 비율.",
+                 "채널 성격: youtube/portal/tv 는 일방·도달 넓음, kakao/instagram/wom 은 양방·폐쇄·전파 빠름. 방어자 정정은 portal/tv 신뢰가 높음.",
+                 "", "## 지난 라운드 기록 (최근)", "| R | 프레임 | 유형 | 표적 집단(상위3) | 채널 상위 | 노출 | A방향 이동 | 방어 탐지 | 되돌림 | ΔA |", "|---|---|---|---|---|---|---|---|---|---|"]
+        if not hist:
+            lines.append("| - | (기록 없음 — 첫 라운드) | | | | | | | | |")
+        for h in hist:
+            lines.append(f"| {h['round']} | {h['frame']} | {h['tier']} | {', '.join(h['groups'][:3])} | {h['channels']} | {h['exposed']:,} | {h['moved_up']:,} | {'Y' if h['detected'] else '-'} | {h['reverted']:,} | {h['dA']:+.4f} |")
+        lines += ["", f"## 인구 집단 ({len(groups)}개) — id | 집단 | 규모 | 설득가능성 | 리터러시 | 이동가능비율 | 최근수율 | 선호채널 | 지난 노출 | 지난 A이동"]
+        for g in groups:
+            lines.append(f"{g['id']} | {g['label']} | {g['size']:,} | {g['persuadability']:.2f} | {g['literacy']:.2f} | {g['movable']:.2f} | {g['yield']:.2f} | {'/'.join(g['top_channels'])} | {g['exposed_last']:,} | {g['moved_up_last']:,}")
+        lines += ["", "## 프레임별 세대 친화도 (19-29/30/40/50/60/70+)"]
+        for fi, f in enumerate(FRAMES):
+            lines.append(f"{f} ({FRAME_LABELS_KO[f]}): " + " ".join(f"{v:.2f}" for v in self.chan.frame_affinity[fi]))
+        lines += ["", f"## 규칙 기반 기본안 (참고): frame={rule_plan.frame}, tier={rule_plan.claim_tier}, 상위 셀 {', '.join(rule_plan.summary()['target_cells_label_top5'][:3])}",
+                  "", f"## 출력: JSON — frame, claim_tier(≤{max_tier}), target_groups(최대 {self.prm.max_groups}개, id·weight>0), channel_mix(6채널 비중, 합 1), intensity(0.2~1.0), rationale(한 문장)."]
+        # context for the mock backend (deterministic plan without parsing text)
+        best_frame = rule_plan.frame
+        hint = {c: round(float(v), 3) for c, v in zip(CHANNELS, rule_plan.channel_mix)}
+        ctx = {"kind": "manipulator", "groups": groups, "best_frame": best_frame, "max_tier": max_tier,
+               "channel_hint": hint, "max_groups": self.prm.max_groups}
+        return "\n".join(lines), ctx
+
+    # ---- plan ----------------------------------------------------------------
+    def plan(self, pop: Population, round_no: int) -> Plan:
+        from ..agents.prompts import STRATEGY_MANIP_SYSTEM
+        rule_plan = super().plan(pop, round_no)
+        brief, ctx = self._brief(pop, round_no, rule_plan)
+        data, err = self.backend.generate(STRATEGY_MANIP_SYSTEM, brief, MANIP_PLAN_SCHEMA, context=ctx)
+        plan = self._apply(data, pop, round_no, rule_plan) if isinstance(data, dict) else None
+        if plan is None:
+            rule_plan.llm = {"used": False, "error": err or "invalid-plan", "fallback": "rule"}
+            return rule_plan
+        return plan
+
+    def _apply(self, d: dict, pop: Population, round_no: int, rule_plan: Plan) -> Plan | None:
+        from .segments import group_label, group_weights_to_cells
+        prm = self.prm
+        frame = d.get("frame") if d.get("frame") in FRAMES else rule_plan.frame
+        try:
+            tier = int(d.get("claim_tier", self.claim_tier))
+        except (TypeError, ValueError):
+            tier = self.claim_tier
+        tier = max(0, min(tier, self.claim_tier))                      # ethics ceiling is hard
+        groups: list[tuple[int, float]] = []
+        for it in (d.get("target_groups") or [])[: prm.max_groups]:
+            try:
+                gid, w = int(it["id"]), float(it["weight"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if 0 <= gid < self.n_groups and w > 0:
+                groups.append((gid, w))
+        if not groups:
+            return None
+        mix = np.array([max(0.0, float((d.get("channel_mix") or {}).get(c, 0.0) or 0.0)) for c in CHANNELS])
+        if mix.sum() <= 0:
+            mix = rule_plan.channel_mix.astype(np.float64)
+        mix = mix / mix.sum()
+        try:
+            intensity = float(d.get("intensity", 1.0))
+        except (TypeError, ValueError):
+            intensity = 1.0
+        intensity = float(np.clip(intensity, 0.2, 1.0))
+        # cells inside the chosen groups split weight ∝ vulnerability × size; eligible cells only
+        counts = pop.cell_state_counts().astype(np.float32)
+        movable = (counts * MOVABLE[None, :]).sum(axis=1) / np.maximum(pop.cell_size, 1)
+        vulnerability = self.cell_pers * (1.0 - self.cell_lit) * movable * self.yield_ema
+        vulnerability[pop.cell_size < prm.min_cell_size] = 0.0
+        cell_w = group_weights_to_cells(groups, vulnerability * pop.cell_size, pop)
+        if cell_w.sum() <= 0:
+            return None
+        budget = self.budget_per_round * intensity
+        cpi = float((mix * self.chan.cpi).sum())
+        impressions = cell_w * budget / max(cpi, 1e-6)
+        impressions = np.minimum(impressions, prm.impressions_per_capita_cap * pop.cell_size)
+        cost = float(impressions.sum() * cpi)
+        cell_impr = impressions[:, None] * mix[None, :]
+        target = np.flatnonzero(cell_w > 0)
+        target = target[np.argsort(-cell_w[target], kind="stable")]
+        msg = f"[{FRAME_LABELS_KO[frame]}] ({CLAIM_TIER_LABELS_KO[CLAIM_TIERS[tier]]}) {TEMPLATES[(frame, tier)]}"
+        llm = {"used": True, "groups": [{"id": g, "label": group_label(g), "weight": round(w, 3)} for g, w in groups],
+               "intensity": intensity, "rationale": str(d.get("rationale", ""))[:300], "model": getattr(self.backend, "strategy_model", None)}
+        return Plan(round_no=round_no, frame=frame, claim_tier=tier, falsehood=tier / 2.0, target_cells=target,
+                    cell_impressions=cell_impr, impressions_total=float(cell_impr.sum()), cost=cost, message=msg,
+                    channel_mix=mix.astype(np.float32), llm=llm)
+
+    # ---- learning hooks ---------------------------------------------------
+    def learn(self, exposed_cells: np.ndarray, moved_up_cells: np.ndarray):
+        super().learn(exposed_cells, moved_up_cells)
+        self.last_exposed_cells = np.bincount(exposed_cells, minlength=N_CELLS).astype(np.float64)
+        self.last_up_cells = np.bincount(moved_up_cells, minlength=N_CELLS).astype(np.float64)
+
+    def observe(self, rec: dict) -> None:
+        from .segments import group_label
+        m = rec["manipulator"]
+        llm = m.get("llm") or {}
+        groups = [g["label"] for g in llm.get("groups", [])] if llm.get("used") else m.get("target_cells_label_top5", [])[:3]
+        mix = sorted(m["channel_mix"].items(), key=lambda kv: -kv[1])[:3]
+        prev_a = self.history[-1]["A"] if self.history else None
+        self.history.append({
+            "round": rec["round_no"], "frame": m["frame"], "tier": m["claim_tier"], "groups": groups,
+            "channels": "/".join(f"{c}:{v:.2f}" for c, v in mix), "exposed": rec["exposure"]["n_exposed"],
+            "moved_up": rec["n_moved_up_total"], "detected": rec["defense"]["detected"], "reverted": rec["defense"]["n_reverted"],
+            "A": rec["support"]["A"], "dA": (rec["support"]["A"] - prev_a) if prev_a is not None else 0.0,
+            "llm_used": bool(llm.get("used")), "rationale": llm.get("rationale", "")})
+
+    def state_dict(self) -> dict:
+        return {"yield_ema": self.yield_ema.tolist(), "history": self.history,
+                "last_exposed_cells": self.last_exposed_cells.tolist(), "last_up_cells": self.last_up_cells.tolist()}
+
+    def load_state_dict(self, d: dict):
+        self.yield_ema = np.array(d["yield_ema"], dtype=np.float32)
+        self.history = list(d.get("history", []))
+        if "last_exposed_cells" in d:
+            self.last_exposed_cells = np.array(d["last_exposed_cells"], dtype=np.float64)
+            self.last_up_cells = np.array(d["last_up_cells"], dtype=np.float64)

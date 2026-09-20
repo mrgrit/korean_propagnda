@@ -12,9 +12,13 @@ promotion:
   k: 500
   k_l3: 100
 
+manipulator:
+  mode: rule          # rule | llm  (P1: LLM 전략가가 프레임·주장유형·표적 집단·채널·강도를 고름)
+
 defender:
   enabled: true
   strength: 0.5
+  mode: rule          # rule | llm
 
 backend:
   kind: cc            # mock | cc | api   (cc = Claude Code subscription session logged in on THIS machine)
@@ -23,6 +27,8 @@ backend:
   timeout_s: 120
   max_wait_s: 900     # wait this long on a usage-limit backoff before falling back + checkpointing
   thinking_tokens: 0  # MAX_THINKING_TOKENS for the worker; 0 halves latency on haiku
+  batch_size: 8       # P1: personas per call (8× fewer calls than one-per-persona)
+  strategy_model: sonnet   # P1: manipulator/defender strategist model (2 calls per round)
   # api alternative: {kind: api, model: claude-haiku-4-5, mode: batch, concurrency: 16}
   # dry run:         --backend mock
 

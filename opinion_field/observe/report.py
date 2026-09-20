@@ -97,7 +97,7 @@ def render_markdown(run_dir: str | Path, display_map: DisplayMap | None = None, 
     traj = trajectory_table(rounds)
     goal = goal_summary(manifest, rounds)
     A, B = dm.name("A"), dm.name("B")
-    lines = [f"# 여론장 P0 리포트 — {manifest['config']['name']}", "",
+    lines = [f"# K-Propaganda P0 리포트 — {manifest['config']['name']}", "",
              f"- 인구: {manifest['data']['n_voters']:,} ({manifest['data']['population_source']})",
              f"- 사전분포 출처: {manifest['data']['priors_provenance']}",
              f"- 라운드: {len(rounds)} / 시드: {manifest['config']['seed']} / 윤리수위: {manifest['config']['ethics_level']} "

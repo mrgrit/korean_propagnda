@@ -31,7 +31,7 @@ RUN_NAME_RX = re.compile(r"^[A-Za-z0-9_\-]{1,40}$")
 FILE_KINDS = {"campaign": "configs/campaign.yaml", "priors": "configs/priors.yaml",
               "channels": "configs/channels.yaml", "display_map": "configs/display_map.yaml"}
 
-app = FastAPI(title="여론장 Opinion Field", docs_url=None, redoc_url=None)
+app = FastAPI(title="K-Propaganda", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 jobs = JobManager()
 
@@ -540,7 +540,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, root: str = ".") -> None:
     os.chdir(ROOT)                      # engine paths (configs/, data/, runs/) are project-relative
     (ROOT / "runs").mkdir(exist_ok=True)
     pw = _password()
-    print(f"[web] 여론장 UI  http://{host}:{port}   root={ROOT}")
+    print(f"[web] K-Propaganda UI  http://{host}:{port}   root={ROOT}")
     print(f"[web] login password is in {_auth_path()} (current: {pw})")
     import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="info", proxy_headers=True, forwarded_allow_ips="*")

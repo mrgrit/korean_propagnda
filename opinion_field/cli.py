@@ -94,7 +94,7 @@ def cmd_report(a):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="opinion-field", description="여론장 P0 engine")
+    p = argparse.ArgumentParser(prog="opinion-field", description="K-Propaganda P0 engine")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     b = sp.add_parser("build-data", help="Nemotron + priors → voters.parquet/personas.parquet/network.npz")

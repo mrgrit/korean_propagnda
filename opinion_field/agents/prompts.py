@@ -11,7 +11,7 @@ from ..schema import (AGE_GROUP_LABELS, CHANNEL_LABELS_KO, EDU_LEVELS, OCC_GROUP
                       SIDO_CANON, STATE_LABELS_KO, SupportState)
 from .backend import L2Request
 
-SYSTEM_PROMPT = """당신은 '여론장' 연구 시뮬레이션의 합성 유권자 반응 생성기입니다.
+SYSTEM_PROMPT = """당신은 'K-Propaganda' 연구 시뮬레이션의 합성 유권자 반응 생성기입니다.
 
 목적: 정치 메시지가 인구 집단에 미치는 영향과 팩트체크·정정의 방어 효과를 **집계 수준**에서 연구하기 위한 에이전트 기반 시뮬레이션입니다. 모든 유권자는 통계 분포로부터 합성된 가상의 페르소나이며, 후보 A·후보 B·정당 갑·정당 을·이슈 I는 익명 슬롯입니다. 실존 인물·정당을 가정하거나 언급하지 마십시오.
 

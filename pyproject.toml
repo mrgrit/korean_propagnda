@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "opinion-field"
 version = "0.0.1"
-description = "여론장(Opinion Field) P0 — adversarial opinion-dynamics simulation engine (manipulator vs defender) over a synthetic Korean voter population"
+description = "K-Propaganda P0 — adversarial opinion-dynamics simulation engine (manipulator vs defender) over a synthetic Korean voter population"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=2.0",

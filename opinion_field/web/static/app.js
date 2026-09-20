@@ -1,4 +1,4 @@
-/* 여론장 web UI — vanilla JS, no build step. Charts are hand-rolled SVG (line, heatmap, bars). */
+/* K-Propaganda web UI — vanilla JS, no build step. Charts are hand-rolled SVG (line, heatmap, bars). */
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
